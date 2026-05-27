@@ -247,8 +247,6 @@ The JSON array format is preferred because it provides better process and signal
 
 Future production hardening could include:
 
-* running the container as a non-root user
-* adding Spring Boot Actuator health endpoints
 * configuring Kubernetes readiness and liveness probes
 * adding JVM memory settings for containers
 * enabling structured JSON logging

@@ -270,3 +270,248 @@ This Dockerfile demonstrates several real-world DevOps practices:
 * separation of build-time and runtime concerns
 
 These patterns help make builds faster, images smaller, and deployments more production-ready.
+
+## Kubernetes Ingress (NGINX)
+
+### What is Kubernetes Ingress?
+
+A Kubernetes `Ingress` exposes HTTP/HTTPS applications running inside the cluster to users outside the cluster.
+
+Without Ingress, a Kubernetes `ClusterIP` service is only reachable internally:
+
+```text
+Pod → Service → only inside Kubernetes
+```
+
+During early local testing we used:
+
+```bash
+kubectl port-forward svc/petclinic 8080:80
+```
+
+This creates a temporary tunnel from the developer machine into Kubernetes.
+
+For a more production-like setup, we use an Ingress Controller.
+
+---
+
+### Why NGINX Ingress Controller?
+
+Kubernetes provides the `Ingress` API object, but it does not implement traffic routing by itself.
+
+An **Ingress Controller** watches Ingress resources and configures an actual reverse proxy/load balancer.
+
+This project uses `ingress-nginx` because:
+
+- widely used Kubernetes ingress controller
+- open source
+- lightweight for local development
+- supports production features:
+  - TLS termination
+  - host-based routing
+  - path-based routing
+  - traffic rules
+  - annotations/customization
+
+---
+
+### Traffic Flow
+
+```text
+Browser
+   |
+   |
+petclinic.local
+   |
+   |
+127.0.0.1:80
+   |
+   |
+kind Node Port Mapping
+   |
+   |
+NGINX Ingress Controller
+   |
+   |
+Ingress Rule
+(host: petclinic.local)
+   |
+   |
+Kubernetes Service
+(ClusterIP)
+   |
+   |
+Spring Boot PetClinic Pod
+(container port 8080)
+```
+
+---
+
+### Local kind setup
+
+Because kind runs Kubernetes nodes as Docker containers, ports must be exposed when the cluster is created.
+
+`kind-config.yaml`
+
+```yaml
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: petclinic-lab
+
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      - containerPort: 80
+        hostPort: 80
+        protocol: TCP
+      - containerPort: 443
+        hostPort: 443
+        protocol: TCP
+```
+
+Create the cluster:
+
+```bash
+kind create cluster --config kind-config.yaml
+```
+
+---
+
+### Install ingress-nginx
+
+Install the NGINX ingress controller:
+
+```bash
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
+```
+
+Wait for the controller:
+
+```bash
+kubectl wait \
+  --namespace ingress-nginx \
+  --for=condition=ready pod \
+  --selector=app.kubernetes.io/component=controller \
+  --timeout=180s
+```
+
+Verify:
+
+```bash
+kubectl get pods -n ingress-nginx
+```
+
+---
+
+### Application Ingress Resource
+
+`k8s/ingress.yaml`
+
+```yaml
+apiVersion: networking.k8s.io/v1
+
+kind: Ingress
+
+metadata:
+  name: petclinic
+
+spec:
+  ingressClassName: nginx
+
+  rules:
+    - host: petclinic.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+
+            backend:
+              service:
+                name: petclinic
+                port:
+                  number: 80
+```
+
+Deploy:
+
+```bash
+kubectl apply -f k8s/ingress.yaml
+```
+
+---
+
+### Local DNS Mapping
+
+Since `petclinic.local` is not a real DNS record, map it locally.
+
+Edit:
+
+```bash
+sudo nano /etc/hosts
+```
+
+Add:
+
+```text
+127.0.0.1 petclinic.local
+```
+
+This simulates production DNS resolution.
+
+Example production equivalent:
+
+```text
+petclinic.company.com
+        |
+        |
+     Public DNS
+        |
+        |
+ Cloud Load Balancer
+        |
+        |
+ Ingress Controller
+```
+
+---
+
+### Testing
+
+Browser:
+
+```text
+http://petclinic.local
+```
+
+Command line:
+
+```bash
+curl http://petclinic.local
+```
+
+---
+
+### Troubleshooting
+
+Check Ingress:
+
+```bash
+kubectl get ingress
+kubectl describe ingress petclinic
+```
+
+Check Service routing:
+
+```bash
+kubectl get svc
+kubectl get endpoints petclinic
+```
+
+Check NGINX controller:
+
+```bash
+kubectl logs \
+  -n ingress-nginx \
+  deploy/ingress-nginx-controller
+```
+

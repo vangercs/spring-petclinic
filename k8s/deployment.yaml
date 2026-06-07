@@ -47,5 +47,12 @@ spec:
             timeoutSeconds: 5
             failureThreshold: 3
           envFrom:
-          - configMapRef:
-              name: petclinic-config
+            - configMapRef:
+                name: petclinic-config
+          volumeMounts:
+            - name: config-volume
+              mountPath: /config
+      volumes:
+        - name: config-volume
+          configMap:
+            name: petclinic-config-file

@@ -480,13 +480,13 @@ petclinic.company.com
 Browser:
 
 ```text
-http://petclinic.local
+https://petclinic.local
 ```
 
 Command line:
 
 ```bash
-curl http://petclinic.local
+curl https://petclinic.local
 ```
 
 ---

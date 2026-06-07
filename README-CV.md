@@ -515,3 +515,315 @@ kubectl logs \
   deploy/ingress-nginx-controller
 ```
 
+## Kubernetes ConfigMap
+
+A ConfigMap is a Kubernetes object used to externalize application configuration from the container image.
+
+Instead of rebuilding the Docker image for every configuration change, values can be injected into the container at runtime.
+
+Typical use cases:
+
+- Environment-specific configuration
+- Feature flags
+- Logging configuration
+- Application properties
+- Non-sensitive configuration values
+
+> Sensitive values like passwords, tokens and certificates should be stored in Kubernetes Secrets, not ConfigMaps.
+
+---
+
+## ConfigMap as Environment Variables
+
+A ConfigMap can expose values as container environment variables.
+
+Example ConfigMap:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: petclinic-config
+data:
+  SPRING_PROFILES_ACTIVE: local
+  LOG_LEVEL: INFO
+```
+
+Deployment:
+
+```yaml
+envFrom:
+  - configMapRef:
+      name: petclinic-config
+```
+
+Inside the container:
+
+```bash
+kubectl exec -it <pod-name> -- env
+```
+
+Example output:
+
+```bash
+SPRING_PROFILES_ACTIVE=local
+LOG_LEVEL=INFO
+```
+
+Environment variables are useful for:
+
+- Small key/value configuration
+- Runtime overrides
+- Environment selection
+
+Examples:
+
+```text
+SPRING_PROFILES_ACTIVE=prod
+JAVA_OPTS=-Xmx512m
+ENVIRONMENT=aks-prod
+```
+
+---
+
+# ConfigMap as Volume Mount
+
+A ConfigMap can also be mounted into the container filesystem as files.
+
+This is useful when applications expect configuration files.
+
+Examples:
+
+- application.properties
+- application.yaml
+- logback.xml
+- nginx.conf
+- prometheus.yaml
+
+Example ConfigMap:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: petclinic-config-file
+
+data:
+  application.properties: |
+    spring.profiles.active=test
+    logging.level.root=INFO
+```
+
+Deployment:
+
+```yaml
+volumeMounts:
+  - name: config-volume
+    mountPath: /config
+
+volumes:
+  - name: config-volume
+    configMap:
+      name: petclinic-config-file
+```
+
+Inside the container:
+
+```bash
+kubectl exec -it <pod-name> -- ls /config
+```
+
+Output:
+
+```text
+application.properties
+```
+
+Check the content:
+
+```bash
+kubectl exec -it <pod-name> -- cat /config/application.properties
+```
+
+---
+
+# Spring Boot Configuration Loading
+
+Spring Boot automatically checks external configuration locations:
+
+```text
+/config/application.properties
+./config/application.properties
+application.properties inside the jar
+```
+
+This allows Kubernetes to override packaged application configuration without rebuilding the Docker image.
+
+Example:
+
+Container image contains:
+
+```properties
+spring.profiles.active=dev
+```
+
+ConfigMap volume provides:
+
+```properties
+spring.profiles.active=test
+```
+
+Application starts with:
+
+```text
+Active profile: test
+```
+
+---
+
+# Configuration Precedence
+
+When the same property exists in multiple places, Spring Boot applies precedence rules.
+
+Higher priority wins:
+
+```text
+Command-line arguments
+        |
+        v
+Environment variables
+        |
+        v
+External configuration files (/config)
+        |
+        v
+Packaged application.properties
+```
+
+Example:
+
+Environment variable ConfigMap:
+
+```bash
+SPRING_PROFILES_ACTIVE=local
+```
+
+Mounted ConfigMap file:
+
+```properties
+spring.profiles.active=test
+```
+
+Application result:
+
+```text
+The following profile is active: local
+```
+
+The environment variable wins.
+
+---
+
+# ConfigMap Updates
+
+## Environment Variable ConfigMaps
+
+Environment variables are injected when the container starts.
+
+Updating the ConfigMap:
+
+```bash
+kubectl edit configmap petclinic-config
+```
+
+does NOT update existing container environment variables.
+
+The pod must be restarted:
+
+```bash
+kubectl rollout restart deployment petclinic
+```
+
+---
+
+## Mounted ConfigMap Volumes
+
+Mounted ConfigMaps are updated automatically by Kubernetes.
+
+Example:
+
+```bash
+kubectl edit configmap petclinic-config-file
+```
+
+Eventually:
+
+```bash
+cat /config/application.properties
+```
+
+shows the new value.
+
+However:
+
+> The application may not automatically reload the configuration.
+
+Spring Boot normally reads configuration only during startup.
+
+For automatic reload:
+
+- Spring Cloud Kubernetes
+- File watchers
+- Application-specific reload mechanisms
+
+---
+
+# Production Pattern
+
+A common production setup:
+
+```text
+Docker Image
+     |
+     | contains defaults
+     v
+application.properties
+     |
+     | overridden by
+     v
+ConfigMap Volume
+     |
+     | overridden by
+     v
+Environment Variables
+     |
+     | overridden by
+     v
+Secrets / runtime overrides
+```
+
+Example:
+
+ConfigMap Volume:
+
+```text
+/config/application.yaml
+/config/logback.xml
+```
+
+ConfigMap Environment Variables:
+
+```text
+SPRING_PROFILES_ACTIVE=prod
+JAVA_OPTS=-Xmx1024m
+```
+
+Secrets:
+
+```text
+DATABASE_PASSWORD
+API_TOKEN
+CERTIFICATES
+```
+
+This keeps the Docker image immutable while allowing each environment to provide its own configuration.

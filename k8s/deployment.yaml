@@ -21,6 +21,11 @@ spec:
           ports:
             - containerPort: 8080
           env:
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: petclinic-secret
+                  key: DB_PASSWORD          
             - name: JAVA_OPTS
               value: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
           resources:
@@ -49,6 +54,8 @@ spec:
           envFrom:
             - configMapRef:
                 name: petclinic-config
+            # - secretRef:
+            #     name: petclinic-secret    
           volumeMounts:
             - name: config-volume
               mountPath: /config

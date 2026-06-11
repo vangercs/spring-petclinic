@@ -827,3 +827,355 @@ CERTIFICATES
 ```
 
 This keeps the Docker image immutable while allowing each environment to provide its own configuration.
+
+## Kubernetes Secrets
+
+A Secret is a Kubernetes object used to store sensitive configuration separately from the container image.
+
+Secrets are commonly used for:
+
+- Database usernames/passwords
+- API keys
+- Tokens
+- Certificates
+- Private keys
+
+Secrets work very similarly to ConfigMaps:
+
+- They can be injected as environment variables
+- They can be mounted as files
+- They allow configuration changes without rebuilding Docker images
+
+> Important: Kubernetes Secrets are base64 encoded by default. Base64 is not encryption.
+
+---
+
+# Creating a Secret
+
+Example Secret:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: petclinic-secret
+
+type: Opaque
+
+data:
+  DB_USERNAME: cGV0Y2xpbmlj
+  DB_PASSWORD: cGFzc3dvcmQ=
+```
+
+The values are base64 encoded:
+
+```text
+cGV0Y2xpbmlj  -> petclinic
+cGFzc3dvcmQ=  -> password
+```
+
+Create encoded values:
+
+```bash
+echo -n "petclinic" | base64
+```
+
+```bash
+echo -n "password" | base64
+```
+
+The `-n` prevents adding a newline character before encoding.
+
+Apply the Secret:
+
+```bash
+kubectl apply -f k8s/secret.yaml
+```
+
+Verify:
+
+```bash
+kubectl get secrets
+```
+
+Example:
+
+```text
+NAME                 TYPE      DATA
+petclinic-secret     Opaque    2
+```
+
+---
+
+# Inspecting Secrets
+
+Describe the Secret:
+
+```bash
+kubectl describe secret petclinic-secret
+```
+
+Output:
+
+```text
+Name: petclinic-secret
+
+Data
+====
+DB_USERNAME:  9 bytes
+DB_PASSWORD:  8 bytes
+```
+
+Kubernetes hides Secret values from describe output.
+
+Decode manually:
+
+```bash
+kubectl get secret petclinic-secret \
+-o jsonpath='{.data.DB_PASSWORD}' | base64 -d
+```
+
+Output:
+
+```text
+password
+```
+
+---
+
+# Inject Secret as Environment Variables
+
+Secrets can be loaded into the container environment.
+
+Deployment example:
+
+```yaml
+envFrom:
+  - configMapRef:
+      name: petclinic-config
+
+  - secretRef:
+      name: petclinic-secret
+```
+
+Restart the Deployment:
+
+```bash
+kubectl rollout restart deployment petclinic
+```
+
+Check inside the container:
+
+```bash
+kubectl exec -it <pod-name> -- env
+```
+
+Example:
+
+```text
+DB_USERNAME=petclinic
+DB_PASSWORD=password
+```
+
+---
+
+# Inject Individual Secret Values
+
+A more controlled approach is selecting individual Secret keys.
+
+Example:
+
+```yaml
+env:
+  - name: DATABASE_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: petclinic-secret
+        key: DB_PASSWORD
+```
+
+Inside the container:
+
+```bash
+echo $DATABASE_PASSWORD
+```
+
+Output:
+
+```text
+password
+```
+
+This avoids exposing every Secret value to the container.
+
+---
+
+# Mount Secret as a Volume
+
+Secrets can also be mounted as files.
+
+Deployment:
+
+```yaml
+volumeMounts:
+  - name: secret-volume
+    mountPath: /secrets
+
+volumes:
+  - name: secret-volume
+    secret:
+      secretName: petclinic-secret
+```
+
+Inside the container:
+
+```bash
+kubectl exec -it <pod-name> -- ls /secrets
+```
+
+Example:
+
+```text
+DB_USERNAME
+DB_PASSWORD
+```
+
+Each Secret key becomes a file.
+
+Read the mounted Secret:
+
+```bash
+cat /secrets/DB_PASSWORD
+```
+
+Output:
+
+```text
+password
+```
+
+---
+
+# Updating Secrets
+
+Environment variable Secrets are loaded only when the container starts.
+
+Updating a Secret:
+
+```bash
+kubectl edit secret petclinic-secret
+```
+
+does not update existing environment variables.
+
+Restart required:
+
+```bash
+kubectl rollout restart deployment petclinic
+```
+
+---
+
+Mounted Secrets behave differently.
+
+Kubernetes updates the mounted files automatically:
+
+```text
+Secret changed
+      |
+      v
+Mounted file updated
+      |
+      v
+/secrets/DB_PASSWORD changes
+```
+
+However, applications usually need reload logic to use the new value.
+
+---
+
+# ConfigMap vs Secret
+
+| Feature | ConfigMap | Secret |
+|---|---|---|
+| Purpose | Non-sensitive config | Sensitive config |
+| Examples | profiles, logging, flags | passwords, tokens, certs |
+| Storage format | plain text | base64 |
+| Environment variables | yes | yes |
+| Volume mount | yes | yes |
+| Auto volume refresh | yes | yes |
+| Encrypted by default | no | depends on cluster |
+
+---
+
+# Production Secret Management
+
+In production, Secrets are often stored outside Kubernetes.
+
+Example AKS pattern:
+
+```text
+Azure Key Vault
+        |
+        |
+        v
+Secrets Store CSI Driver
+        |
+        |
+        v
+Kubernetes Pod
+
+
+Mounted Secret:
+/mnt/secrets/database-password
+
+Environment:
+DATABASE_PASSWORD
+```
+
+Benefits:
+
+- Kubernetes does not store the original secret
+- Centralized secret rotation
+- Access controlled with identities
+- Audit logging
+
+Common enterprise tools:
+
+- Azure Key Vault
+- HashiCorp Vault
+- AWS Secrets Manager
+- Google Secret Manager
+
+---
+
+# Typical Application Configuration Flow
+
+```text
+Docker Image
+     |
+     | contains defaults
+     v
+
+application.properties
+
+     |
+     | overridden by
+     v
+
+ConfigMap Volume
+
+     |
+     | overridden by
+     v
+
+ConfigMap Environment Variables
+
+     |
+     | combined with
+     v
+
+Secrets
+```
+
+This keeps application images immutable and allows each environment to provide its own secure configuration.

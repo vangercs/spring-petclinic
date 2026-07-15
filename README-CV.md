@@ -1179,3 +1179,24 @@ Secrets
 ```
 
 This keeps application images immutable and allows each environment to provide its own secure configuration.
+
+## PostgreSQL Persistent Storage
+
+PostgreSQL stores its database files on a Kubernetes
+PersistentVolumeClaim rather than in the container filesystem.
+
+The PVC is mounted at:
+
+`/var/lib/postgresql/data`
+
+This allows database data to survive PostgreSQL pod recreation.
+
+### Verify persistence
+
+1. Create an owner in PetClinic.
+2. Delete the PostgreSQL pod.
+3. Wait for Kubernetes to create a replacement.
+4. Confirm that the previously created owner still exists.
+
+> Note: Local kind storage protects against pod recreation, but deleting
+> the entire kind cluster may also delete the underlying development data.

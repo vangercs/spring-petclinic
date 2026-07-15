@@ -25,7 +25,9 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: petclinic-secret
-                  key: DB_PASSWORD          
+                  key: DB_PASSWORD         
+            - name: SERVICE_BINDING_ROOT
+              value: /bindings 
             - name: JAVA_OPTS
               value: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
           resources:
@@ -59,7 +61,12 @@ spec:
           volumeMounts:
             - name: config-volume
               mountPath: /config
+            - name: postgres-binding
+              mountPath: /bindings/postgres
       volumes:
         - name: config-volume
           configMap:
             name: petclinic-config-file
+        - name: postgres-binding
+          secret:
+            secretName: petclinic-db

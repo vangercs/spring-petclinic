@@ -1180,23 +1180,131 @@ Secrets
 
 This keeps application images immutable and allows each environment to provide its own secure configuration.
 
-## PostgreSQL Persistent Storage
+# Persistent Storage with PostgreSQL
 
-PostgreSQL stores its database files on a Kubernetes
-PersistentVolumeClaim rather than in the container filesystem.
+By default, containers use an ephemeral filesystem, meaning all data is lost when the container is recreated.
 
-The PVC is mounted at:
+To ensure PostgreSQL data survives pod recreation, the database uses a **PersistentVolumeClaim (PVC)** mounted at:
 
-`/var/lib/postgresql/data`
+```text
+/var/lib/postgresql/data
+```
 
-This allows database data to survive PostgreSQL pod recreation.
+The PVC provides persistent storage independent of the PostgreSQL pod lifecycle.
 
-### Verify persistence
+## PersistentVolumeClaim
 
-1. Create an owner in PetClinic.
-2. Delete the PostgreSQL pod.
-3. Wait for Kubernetes to create a replacement.
-4. Confirm that the previously created owner still exists.
+```yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: demo-db-data
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+```
 
-> Note: Local kind storage protects against pod recreation, but deleting
-> the entire kind cluster may also delete the underlying development data.
+## Volume Mount
+
+```yaml
+volumeMounts:
+  - name: postgres-data
+    mountPath: /var/lib/postgresql/data
+
+volumes:
+  - name: postgres-data
+    persistentVolumeClaim:
+      claimName: demo-db-data
+```
+
+## Verification
+
+Persistence was verified by:
+
+1. Creating application data in PetClinic.
+2. Deleting the PostgreSQL pod.
+3. Allowing Kubernetes to recreate the pod automatically.
+4. Confirming the application data remained available.
+
+This demonstrates that the data resides on the PersistentVolume rather than inside the container filesystem.
+
+# StatefulSet
+
+Initially PostgreSQL was deployed as a standard Kubernetes Deployment.
+
+While Deployments work well for stateless applications, databases require:
+
+- Stable network identity
+- Persistent storage
+- Predictable pod names
+- Ordered startup and shutdown
+
+For these reasons PostgreSQL was migrated to a **StatefulSet**.
+
+## Headless Service
+
+A headless Service provides stable DNS entries for StatefulSet pods.
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+spec:
+  clusterIP: None
+```
+
+This allows Kubernetes to assign a predictable hostname:
+
+```text
+postgres-0.postgres.default.svc.cluster.local
+```
+
+Applications can continue connecting using the Service name:
+
+```text
+postgres:5432
+```
+
+## StatefulSet
+
+```yaml
+kind: StatefulSet
+```
+
+Unlike a Deployment, the PostgreSQL pod now has a stable identity:
+
+```text
+postgres-0
+```
+
+instead of randomly generated names such as:
+
+```text
+postgres-6df7d9c8d8-vx9tp
+```
+
+The StatefulSet reuses the existing PersistentVolumeClaim, ensuring database files remain available after pod recreation.
+
+## Verification
+
+The StatefulSet behavior was verified by:
+
+1. Migrating PostgreSQL from a Deployment to a StatefulSet.
+2. Reusing the existing PersistentVolumeClaim.
+3. Deleting the PostgreSQL pod.
+4. Confirming Kubernetes recreated the pod as `postgres-0`.
+5. Verifying all existing PetClinic data remained intact.
+
+This demonstrates the use of StatefulSets for stateful workloads while preserving persistent storage.
+
+## What I Learned
+
+- Why databases should use StatefulSets instead of Deployments.
+- How PersistentVolumeClaims survive pod recreation.
+- How headless Services provide stable network identities.
+- The difference between ephemeral container storage and persistent volumes.
+- Why StatefulSets provide predictable pod names and ordered lifecycle management.
